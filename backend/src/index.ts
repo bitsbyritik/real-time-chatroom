@@ -9,13 +9,13 @@ const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 
 //Store room and their connection
-const rooms: Record<string, Set<WebSocket>> = {};
+const rooms: Record<string, Map<WebSocket, string>> = {};
 
 wss.on("connection", (ws) => {
   console.log("New Client Connected");
 
   let roomId: string;
-
+  let userName: string;
   ws.on("error", () => {
     console.error();
   });
@@ -25,18 +25,36 @@ wss.on("connection", (ws) => {
 
     if (data.type === "join") {
       roomId = data.roomId;
+      userName = data.userName;
 
       if (!rooms[roomId]) {
-        rooms[roomId] = new Set();
+        rooms[roomId] = new Map();
       }
-      rooms[roomId].add(ws);
-      ws.send(`User joined room: ${roomId}`);
-      ws.send(`Room size: ${rooms[roomId].size}`);
+      rooms[roomId].set(ws, userName);
+
+      rooms[roomId].forEach((name, client) => {
+        if (client.readyState === ws.OPEN) {
+          client.send(
+            JSON.stringify({
+              type: "notification",
+              text: `${userName} has joined the room`,
+              size: rooms[roomId].size,
+            }),
+          );
+        }
+      });
     } else if (data.type === "message") {
-      if (rooms[roomId]) {
+      const roomId = data.roomId;
+      if (roomId && rooms[roomId]) {
         wss.clients.forEach((client) => {
           if (client !== ws && client.readyState === ws.OPEN) {
-            client.send(JSON.stringify({ type: "message", text: data.text }));
+            client.send(
+              JSON.stringify({
+                type: "message",
+                text: data.text,
+                sender: userName,
+              }),
+            );
           }
         });
       }
@@ -44,13 +62,38 @@ wss.on("connection", (ws) => {
   });
   ws.on("close", () => {
     if (roomId && rooms[roomId]) {
-      rooms[roomId].delete(ws);
-      ws.send(`User left the room: ${roomId}`);
-    }
+      const userName = rooms[roomId].get(ws);
 
-    if (rooms[roomId].size === 0) {
-      delete rooms[roomId];
-      ws.send(`Room deleted: ${roomId}`);
+      const roomSizeBeforeRemoval = rooms[roomId].size;
+
+      rooms[roomId].delete(ws);
+
+      rooms[roomId].forEach((name, client) => {
+        if (client.readyState === ws.OPEN) {
+          client.send(
+            JSON.stringify({
+              type: "notification",
+              text: `${userName} has left the room`,
+              size: rooms[roomId].size,
+            }),
+          );
+        }
+      });
+
+      console.log(`${userName} left the room: ${roomId}`);
+      if (ws.readyState === ws.OPEN) {
+        ws.send(
+          JSON.stringify({
+            type: "roomSize",
+            size: rooms[roomId].size,
+          }),
+        );
+      }
+
+      if (roomSizeBeforeRemoval === 1) {
+        delete rooms[roomId];
+        ws.send(`Room deleted: ${roomId}`);
+      }
     }
   });
 });
