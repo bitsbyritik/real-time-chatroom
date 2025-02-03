@@ -2,15 +2,23 @@ import { useEffect, useRef, useState } from "react";
 import { Heading } from "./components/Heading";
 import { Button } from "./components/ui/button";
 import { Input } from "./components/ui/input";
-import { Copy } from "lucide-react";
-import { CopyToClipboard } from "react-copy-to-clipboard";
+import { Wrapper } from "./components/Wrapper";
+import { CopyBtn } from "./components/CopyBtn";
 import { toast } from "./hooks/use-toast";
+
+interface Message {
+  text: string;
+  sender: string;
+}
 
 const App = () => {
   const [roomId, setRoomId] = useState("");
   const [userName, setUserName] = useState("");
   const [joined, setJoined] = useState(false);
   const ws = useRef<WebSocket | null>(null);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [roomSize, setRoomSize] = useState(0);
+  const [inputValue, setInputValue] = useState("");
 
   useEffect(() => {
     if (joined) {
@@ -19,12 +27,41 @@ const App = () => {
       ws.current.onopen = () => {
         ws.current?.send(JSON.stringify({ type: "join", roomId, userName }));
       };
+
+      ws.current.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+
+        if (data.type === "notification") {
+          toast({
+            title: data.text,
+          });
+          setRoomSize(data.size);
+        }
+
+        if (data.type === "message") {
+          setMessages((prevMessage) => [
+            ...prevMessage,
+            { text: data.text, sender: data.sender },
+          ]);
+        }
+      };
+
+      ws.current.onclose = () => {
+        toast({
+          title: "Connection disconnected!",
+        });
+      };
+
+      return () => {
+        if (ws.current) {
+          ws.current.close();
+        }
+      };
     }
-  });
+  }, [joined, roomId, userName]);
 
   const generateRoomId = () => {
-    const chars =
-      "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+    const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
     let result = "";
 
     for (let i = 0; i < 6; i++) {
@@ -40,20 +77,35 @@ const App = () => {
     }
   };
 
+  const sendMessage = () => {
+    if (ws.current && inputValue) {
+      ws.current.send(
+        JSON.stringify({ type: "message", roomId: roomId, text: inputValue }),
+      );
+
+      setMessages((prevMessage) => [
+        ...prevMessage,
+        { text: inputValue, sender: "me" },
+      ]);
+
+      setInputValue("");
+    }
+  };
+
   return (
     <>
       <div className="bg-[#0A0A0A] h-screen w-full flex items-center justify-center">
         {!joined ? (
-          <div className="w-1/3 space-y-6 border border-slate-500 m-4 p-6 rounded-lg bg-[#1f2937] shadow-[0px_0px_0px_1px_rgba(0,0,0,0.06),0px_1px_1px_-0.5px_rgba(0,0,0,0.06),0px_3px_3px_-1.5px_rgba(0,0,0,0.06),_0px_6px_6px_-3px_rgba(0,0,0,0.06),0px_12px_12px_-6px_rgba(0,0,0,0.06),0px_24px_24px_-12px_rgba(0,0,0,0.06)]">
+          <Wrapper>
             <Heading />
             <Button
               variant={"default"}
-              className="bg-gray-200 text-black p-6 w-full font-jetbrains text-xl "
+              className="bg-gray-200  text-black p-6 w-full font-jetbrains text-xl "
               onClick={generateRoomId}
             >
               Create New Room
             </Button>
-            <form className="flex flex-col gap-5">
+            <form className="flex flex-col gap-5 mt-8">
               <div className="relative w-full flex flex-row">
                 <Input
                   type="text"
@@ -62,23 +114,7 @@ const App = () => {
                   onChange={(e) => setRoomId(e.target.value)}
                   className="font-jetbrains h-12 text-lg text-white"
                 />
-                {roomId && (
-                  <CopyToClipboard
-                    text={roomId}
-                    onCopy={() => {
-                      toast({
-                        title: "Copied to clipboard!",
-                      });
-                    }}
-                  >
-                    <Button
-                      className="bg-gray-200 absolute m-1.5 right-1 cursor-pointer"
-                      onClick={(e) => e.preventDefault()}
-                    >
-                      <Copy size={"2rem"} className="text-black" />
-                    </Button>
-                  </CopyToClipboard>
-                )}
+                {roomId && <CopyBtn text={roomId} />}
               </div>
               <div className="flex flex-row gap-2">
                 <Input
@@ -95,9 +131,49 @@ const App = () => {
                 </Button>
               </div>
             </form>
-          </div>
+          </Wrapper>
         ) : (
-          <div className="text-blue-100">Joined</div>
+          <Wrapper>
+            <Heading />
+            <div className="font-jetbrains text-gray-200 bg-gray-700 py-2 px-4 rounded-lg flex justify-between">
+              <div>
+                Room Id: <span>{roomId}</span>
+              </div>
+              <div>
+                Users: <span>{roomSize}</span>
+              </div>
+            </div>
+            <div className="font-jetbrains border border-gray-500 rounded-lg h-96 overflow-x-hidden overflow-y-auto scroll-smooth scrollbar-thin scrollbar-thumb-gray-400 scrollbar-track-transparent hover:scrollbar-thumb-gray-500">
+              {messages.map((msg, index) => (
+                <div
+                  key={index}
+                  className={`m-2 max-w-60 w-fit p-2 flex flex-col rounded-lg text-gray-200 bg-gray-700 break-words whitespace-normal ${msg.sender === "me" ? "ml-auto bg-gray-700" : "mr-auto bg-blue-900"} `}
+                >
+                  {msg.sender !== "me" ? (
+                    <span className="text-red-400">~ {msg.sender}</span>
+                  ) : (
+                    ""
+                  )}
+                  <span className="whitespace-normal w">{msg.text}</span>
+                </div>
+              ))}
+            </div>
+            <div className="font-jetbrains flex gap-x-2">
+              <Input
+                placeholder={"Enter your message here"}
+                className="text-gray-200 py-2 text-sm"
+                value={inputValue}
+                onChange={(e) => setInputValue(e.target.value)}
+              />
+              <Button
+                className="bg-gray-200 text-black px-6 text-sm"
+                onClick={sendMessage}
+                disabled={!inputValue}
+              >
+                Send
+              </Button>
+            </div>
+          </Wrapper>
         )}
       </div>
     </>
