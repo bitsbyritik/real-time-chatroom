@@ -82,11 +82,11 @@ wss.on("connection", (ws) => {
         }
       });
 
-      console.log(`${userName} left the room: ${roomId}`);
       if (ws.readyState === ws.OPEN) {
         ws.send(
           JSON.stringify({
-            type: "roomSize",
+            type: "notification",
+            text: `${userName} left the room`,
             size: rooms[roomId].size,
           }),
         );
@@ -94,7 +94,7 @@ wss.on("connection", (ws) => {
 
       if (roomSizeBeforeRemoval === 1) {
         delete rooms[roomId];
-        ws.send(`Room deleted: ${roomId}`);
+        console.log(`Room deleted: ${roomId}`);
       }
     }
   });
